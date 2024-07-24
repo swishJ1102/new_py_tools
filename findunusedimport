@@ -1,0 +1,72 @@
+import javalang
+import re
+
+def find_unused_imports(java_code):
+    # 解析 Java 代码
+    tree = javalang.parse.parse(java_code)
+    
+    # 提取所有的 import 语句和静态 import 语句
+    imports = set()
+    static_imports = set()
+    for imp in tree.imports:
+        if imp.static:
+            static_imports.add(imp.path)
+        else:
+            imports.add(imp.path)
+    
+    # 提取所有实际使用的类型（类、接口、枚举）
+    used_types = set()
+    for path, node in tree:
+        if isinstance(node, javalang.tree.Type):
+            if isinstance(node.name, str):
+                used_types.add(node.name.split('.')[-1])  # 仅取类型名
+            elif isinstance(node.name, javalang.tree.BasicType):
+                used_types.add(node.name.name)
+        elif isinstance(node, javalang.tree.MethodInvocation):
+            if isinstance(node.qualifier, str):
+                used_types.add(node.qualifier.split('.')[-1])
+    
+    # 处理嵌套类型和内部类
+    nested_types = set()
+    for path, node in tree:
+        if isinstance(node, javalang.tree.ClassDeclaration) and node.extends:
+            nested_types.add(node.extends.name.split('.')[-1])
+        if isinstance(node, javalang.tree.ClassDeclaration) and node.implements:
+            for impl in node.implements:
+                nested_types.add(impl.name.split('.')[-1])
+    
+    # 合并使用的类型
+    used_types.update(nested_types)
+    
+    # 检查代码中的字符串和注释，防止误判
+    code_without_comments = re.sub(r'//.*?(\n|$)|/\*.*?\*/', '', java_code, flags=re.DOTALL)
+    string_literals = re.findall(r'"([^"]*)"', code_without_comments)
+    for literal in string_literals:
+        for word in literal.split():
+            used_types.add(word)
+    
+    # 查找无用的 import 语句
+    unused_imports = imports - used_types
+    unused_static_imports = static_imports - used_types
+    
+    return unused_imports, unused_static_imports
+
+# 示例 Java 代码
+java_code = """
+import java.util.List;
+import java.util.ArrayList;
+import java.io.File;
+import static java.lang.Math.*;
+
+public class Example {
+    private List<String> list = new ArrayList<>();
+    private double value = sqrt(25);
+    // Unused import: java.io.File
+    /* This is a comment with File */
+}
+"""
+
+# 查找无用的 import 语句
+unused_imports, unused_static_imports = find_unused_imports(java_code)
+print("Unused imports:", unused_imports)
+print("Unused static imports:", unused_static_imports)
